@@ -45,7 +45,7 @@ class Memory(object):
             self.RAM[addr-0x8000] = value
 
     def read_word(self, addr):
-        return self.read_byte(addr) + (self.ready_byte(addr+1) << 8)
+        return self.read_byte(addr) + (self.read_byte(addr+1) << 8)
 
     def write_word(self, addr, value):
         self.write_byte(addr, value & 255)
@@ -75,3 +75,4 @@ class GameBoy(object):
 ROM = open('../Jeux/Tetris.gb','rb').read()
 gb = GameBoy(ROM)
 print gb.get_ROM_name()
+gb.launch()
