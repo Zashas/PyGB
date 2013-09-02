@@ -61,12 +61,22 @@ class GameBoy(object):
         chars = self.memory.ROM[0x0134:0x0143]
         return "".join([chr(x) for x in chars])
 
+    def check(self):
+        i = 0
+        for x in xrange(256):
+            try:
+                self.Z80.CB_OPCODES[x](self.Z80)
+                i += 1
+            except Exception as e:
+                print hex(x), "missing", e
+        print i,"/ 256 CB instructions are written"
+
     def launch(self):
         while self.Z80.PC != 0x0100:
             self.Z80.next_instruction()
 
         self.BIOS_has_run = True
-        run()
+        self.run()
 
     def run(self):
         while True:
@@ -75,4 +85,4 @@ class GameBoy(object):
 ROM = open('../Jeux/Tetris.gb','rb').read()
 gb = GameBoy(ROM)
 print gb.get_ROM_name()
-gb.launch()
+gb.check()

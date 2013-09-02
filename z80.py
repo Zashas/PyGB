@@ -8,18 +8,19 @@ FLAGS = {
 }
 
 class Z80(object):
+    done = []
     m, t = 0,0 #Two clocks
     registers = {
-                'A':0, #A, B, C, D E, H, L and F are all 8bit registers
+                'A':0x1, #A, B, C, D E, H, L and F are all 8bit registers
                 'B':0, #Some can be paired together to form 16bit registers : BC, DE, HL
-                'C':0,
+                'C':0x13,
                 'D':0,
-                'E':0,
-                'H':0,
-                'L':0,
+                'E':0xD8,
+                'H':0x4D,
+                'L':1,
                 'F':0, #Flag with data about the last operation's results
-                'SP':0, #Stack pointer
-                'PC':0 #Program counter, SP and PC are both 16bit registers
+                'SP':0xFFFE, #Stack pointer
+                'PC':0x0100 #Program counter, SP and PC are both 16bit registers
     }
 
     def __init__(self, memory):
@@ -33,8 +34,15 @@ class Z80(object):
         self.registers['PC'] += val
 
     @property
+    def SP(self):
+        return self.registers['SP']
+
+    def incSP(self, val=1):
+        self.registers['SP'] += val
+
+    @property
     def HL(self):
-        return (self.registers['H'] << 8) | self.registers['L']
+        return (self.registers['L'] << 8) | self.registers['H']
 
     def update_clocks(self, t, m):
         self.t += t
@@ -42,15 +50,17 @@ class Z80(object):
 
     def next_instruction(self): #Executes the following instruction
         opcode = self.memory.read_byte(self.PC)
+        pc = self.PC
         self.incPC()
         if opcode == 0xCB:
             opcode = self.memory.read_byte(self.PC)
-            print "Executing CB opcode {0}".format(hex(opcode))
+            print "[PC {1}] Executing CB opcode {0}".format(hex(opcode), hex(self.PC-1))
             self.incPC()
             self.CB_OPCODES[opcode](self)
         else:
-            print "Executing opcode {0}".format(hex(opcode))
+            print "[PC {1}] Executing opcode {0}".format(hex(opcode), hex(self.PC-1))
             self.OPCODES[opcode](self)
+        print self.registers
 
     def reset_flags(self):
         self.registers['F'] = 0
@@ -62,11 +72,158 @@ class Z80(object):
             self.registers['F'] ^= FLAGS[flag]
 
     def get_flag(self, flag):
-        return self.reg['F'] & FLAGS[flag]
+        return self.registers['F'] & FLAGS[flag]
+
+    def unsigned_to_signed(self, value):
+        if value < 128:
+            return value
+        return -((~value+1) & 255)
 
     """ INSTRUCTIONS """
 
-    #INCREMENTATION AND DECREMENTATION INSTRUCTIONS
+    def NOP(self):
+        pass
+
+    #ADD (addition) INSTRUCTIONS
+    def ADD(self, r):
+        value = self.registers[r]
+        result = self.registers['A'] + value
+
+        self.set_flag('Z', result&255 == 0)
+        self.set_flag('N', 0)
+        self.set_flag('C', result > 255)
+        self.set_flag('H', ((value ^ self.registers['A'] ^ result) & 16) > 0)
+
+        self.registers['A'] = (result & 255)
+        self.update_clocks(1, 4)
+
+    def ADD_n(self):
+        value = self.memory.read_byte(self.PC)
+        result = self.registers['A'] + value
+
+        self.set_flag('Z', result&255 == 0)
+        self.set_flag('N', 0)
+        self.set_flag('C', result > 255)
+        self.set_flag('H', ((value ^ self.registers['A'] ^ result) & 16) > 0)
+
+        self.registers['A'] = (result & 255)
+        self.incPC()
+        self.update_clocks(2, 8)
+
+    def ADD_HL(self):
+        value = self.memory.read_byte(self.HL)
+        result = self.registers['A'] + value
+
+        self.set_flag('Z', result&255 == 0)
+        self.set_flag('N', 0)
+        self.set_flag('C', result > 255)
+        self.set_flag('H', ((value ^ self.registers['A'] ^ result) & 16) > 0)
+
+        self.registers['A'] = (result & 255)
+        self.update_clocks(2, 8)
+
+    def ADC(self, r):
+        self.registers['A'] += 1 if self.get_flag('C') else 0
+        self.ADD(r)
+
+    def ADC_HL(self):
+        self.registers['A'] += 1 if self.get_flag('C') else 0
+        self.ADD_HL()
+
+    def ADC_n(self):
+        self.registers['A'] += 1 if self.get_flag('C') else 0
+        self.ADD_n()
+
+    def ADD16(self, r):
+        value = self.SP if r == "SP" else (self.registers[r[1]] << 8) | self.registers[r[0]]
+        result = self.HL + value
+
+        self.set_flag('N', 0)
+        self.set_flag('C', result > 0xFFFF)
+        self.set_flag('H', ((value ^ self.HL ^ result) & 256) > 0) #TODO CHECK
+
+        result &= 0xFFFF
+        self.registers['L'] = result >> 8
+        self.registers['H'] = result & 255
+
+    def ADD_SP(self):
+        value = self.unsigned_to_signed(self.memory.read_byte(self.PC))
+        result = self.SP + value
+
+        self.reset_flags()
+        self.set_flag('C', result > 0xFFFF)
+        self.set_flag('H', ((value ^ self.SP ^ result) & 256) > 0) #TODO CHECK
+
+        result &= 0xFFFF
+        self.registers['SP'] = result
+        self.update_clocks(2, 16)
+
+    def ADD_SP_to_HL(self):
+        value = self.unsigned_to_signed(self.memory.read_byte(self.PC))
+        result = self.SP + value
+
+        self.reset_flags()
+        self.set_flag('C', result > 0xFFFF)
+        self.set_flag('H', ((value ^ self.SP ^ result) & 256) > 0) #TODO CHECK
+
+        result &= 0xFFFF
+        self.registers['L'] = result >> 8
+        self.registers['H'] = result & 255
+
+        self.update_clocks(2, 12)
+
+    #SUB (substraction) INSTRUCTIONS
+
+    def SUB(self, r):
+        value = self.registers[r]
+        result = self.registers['A'] - value
+
+        self.set_flag('Z', result&255 == 0)
+        self.set_flag('N', 1)
+        self.set_flag('C', result < 255)
+        self.set_flag('H', ((value ^ self.registers['A'] ^ result) & 16) > 0)
+
+        self.registers['A'] = (result & 255)
+        self.update_clocks(1, 4)
+
+    def SUB_HL(self):
+        value = self.memory.read_byte(self.HL)
+        result = self.registers['A'] - value
+
+        self.set_flag('Z', result&255 == 0)
+        self.set_flag('N', 1)
+        self.set_flag('C', result < 255)
+        self.set_flag('H', ((value ^ self.registers['A'] ^ result) & 16) > 0)
+
+        self.registers['A'] = (result & 255)
+        self.update_clocks(1, 8)
+
+    def SUB_n(self):
+        value = self.memory.read_byte(self.PC)
+        result = self.registers['A'] - value
+
+        self.set_flag('Z', result&255 == 0)
+        self.set_flag('N', 1)
+        self.set_flag('C', result < 255)
+        self.set_flag('H', ((value ^ self.registers['A'] ^ result) & 16) > 0)
+
+        self.registers['A'] = (result & 255)
+        self.incPC()
+        self.update_clocks(2, 8)
+
+    def SBC(self, r):
+        self.registers['A'] -= 1 if self.get_flag('C') else 0
+        self.SUB(r)
+
+    def SBC_HL(self):
+        self.registers['A'] -= 1 if self.get_flag('C') else 0
+        self.SUB_HL()
+
+    def SBC_n(self):
+        self.registers['A'] -= 1 if self.get_flag('C') else 0
+        self.SUB_n()
+
+    #INC (incrementation) AND DEC (decrementation) INSTRUCTIONS
     def INC(self, r):
         self.registers[r] += 1
         self.registers[r] &= 255
@@ -107,62 +264,83 @@ class Z80(object):
         self.update_clocks(1, 12)
 
     def INC16(self, r):
-        value = (self.registers[r[0]] << 8) | self.reg[r[0]]
+        value = (self.registers[r[1]] << 8) | self.registers[r[0]]
         value += 1
         value &= 0xFFFF
 
-        self.reg[r[0]] = value >> 8  #upper nibble
-        self.reg[r[1]] = value & 255 #lower nibble
+        self.registers[r[1]] = value >> 8  #upper nibble
+        self.registers[r[0]] = value & 255 #lower nibble
 
         self.update_clocks(1, 8)
 
     def DEC16(self, r):
-        value = (self.registers[r[0]] << 8) | self.reg[r[0]]
+        value = (self.registers[r[1]] << 8) | self.registers[r[0]]
         value -= 1
         value &= 0xFFFF
 
-        self.reg[r[0]] = value >> 8  #upper nibble
-        self.reg[r[1]] = value & 255 #lower nibble
+        self.registers[r[1]] = value >> 8  #upper nibble
+        self.registers[r[0]] = value & 255 #lower nibble
 
         self.update_clocks(1, 8)
 
-    #LD (load) INSTRUCTIONS
-
-    def LD(self, r1, r2):
-        self.registers[r1] = self.registers[r2]
-        self.update_clocks(1,4)
-
-    def LD_to_addr(self, dst, src):
-        dst_strong, dst_weak = dst[0], dst[1]
-        addr = (dst_strong << 8) | dst_weak
-        self.memory.write_byte(addr, self.registers[src])
+    def INC_SP(self):
+        self.registers['SP'] += 1
+        self.registers['SP'] &= 0xFFFF
         self.update_clocks(1, 8)
 
-    def LD_from_addr(self, dst, src):
-        src_strong, src_weak = src[0], src[1]
-        addr = (src_strong << 8) | src_weak
-        self.registers[dst] = self.memory.read_byte(addr)
+    def DEC_SP(self):
+        self.registers['SP'] -= 1
+        self.registers['SP'] &= 0xFFFF
         self.update_clocks(1, 8)
 
-    def LD16_nn(self, r):
-        r_strong, r_weak = r[0],r[1]
-        self.registers[r_strong] = self.memory.read_byte(self.PC+1)
-        self.registers[r_weak] = self.memory.read_byte(self.PC)
-        self.incPC(2)
-        self.update_clocks(3, 12)
+    #LOGICAL INSTRUCTIONS (AND, OR, XOR, CPL)
 
-    def LD_to_RAM(self):
-        addr = 0xFF00+self.memory.read_byte(self.PC)
-        self.memory.write_byte(addr, self.registers['A'])
+    def AND(self, r):
+        self.registers['A'] &= self.registers[r]
+
+        self.reset_flags()
+        self.set_flag('H', 1)
+        self.set_flag('Z', self.registers['A'] == 0)
+        self.update_clocks(1, 4)
+
+    def AND_HL(self):
+        self.registers['A'] &= self.memory.read_byte(self.HL)
+
+        self.reset_flags()
+        self.set_flag('H', 1)
+        self.set_flag('Z', self.registers['A'] == 0)
+        self.update_clocks(1, 8)
+
+    def AND_n(self):
+        self.registers['A'] &= self.memory.read_byte(self.PC)
         self.incPC()
-        self.update_clocks(2,12)
 
-    def LD_SP_nn(self):
-        self.registers['SP'] = self.memory.read_word(self.PC)
-        self.incPC(2)
-        self.update_clocks(3, 12)
+        self.reset_flags()
+        self.set_flag('H', 1)
+        self.set_flag('Z', self.registers['A'] == 0)
+        self.update_clocks(2, 8)
 
-    #XOR INSTRUCTIONS
+    def OR(self, r):
+        self.registers['A'] |= self.registers[r]
+
+        self.reset_flags()
+        self.set_flag('Z', self.registers['A'] == 0)
+        self.update_clocks(1, 4)
+
+    def OR_HL(self):
+        self.registers['A'] |= self.memory.read_byte(self.HL)
+
+        self.reset_flags()
+        self.set_flag('Z', self.registers['A'] == 0)
+        self.update_clocks(1, 8)
+
+    def OR_n(self):
+        self.registers['A'] |= self.memory.read_byte(self.PC)
+        self.incPC()
+
+        self.reset_flags()
+        self.set_flag('Z', self.registers['A'] == 0)
+        self.update_clocks(2, 8)
 
     def XOR(self, r):
         self.registers['A'] ^= self.registers[r]
@@ -180,6 +358,524 @@ class Z80(object):
         self.registers['A'] ^= self.memory.read_byte(self.PC)
         self.reset_flags()
         self.set_flag('Z', bool(self.registers['A']))
+        self.incPC()
+        self.update_clocks(2, 8)
+
+    def CPL(self):
+        self.registers['A'] = self.registers['A'] ^ 0xFF
+        self.set_flag('N', 1)
+        self.set_flag('H', 1)
+        self.update_clocks(1, 4)
+
+
+    #LD (load) INSTRUCTIONS
+
+    def LD(self, r1, r2):
+        self.registers[r1] = self.registers[r2]
+        self.update_clocks(1,4)
+
+    def LD_n(self, r):
+        self.registers[r] = self.memory.read_byte(self.PC)
+        self.incPC()
+        self.update_clocks(2, 8)
+
+    def LD_to_addr(self, dst, src):
+        dst_strong, dst_weak = self.registers[dst[1]], self.registers[dst[0]]
+        addr = (dst_strong << 8) | dst_weak
+        self.memory.write_byte(addr, self.registers[src])
+        self.update_clocks(1, 8)
+
+    def LD_from_addr(self, dst, src):
+        src_strong, src_weak = self.registers[src[1]], self.registers[src[0]]
+        addr = (src_strong << 8) | src_weak
+        self.registers[dst] = self.memory.read_byte(addr)
+        self.update_clocks(1, 8)
+
+    def LD16_nn(self, r):
+        r_strong, r_weak = r[1],r[0]
+        self.registers[r_strong] = self.memory.read_byte(self.PC+1)
+        self.registers[r_weak] = self.memory.read_byte(self.PC)
+        self.incPC(2)
+        self.update_clocks(3, 12)
+
+    def LD_SP_nn(self):
+        self.registers['SP'] = self.memory.read_word(self.PC)
+        self.incPC(2)
+        self.update_clocks(3, 12)
+
+    def LD_nn_SP(self):
+        self.memory.write_word(self.memory.read_word(self.PC), self.SP)
+        self.incPC(2)
+        self.update_clocks(3, 20)
+
+    def LDH_C(self):
+        self.memory.write_byte(0xFF00 + self.registers['C'], self.registers['A'])
+        self.update_clocks(2, 8)
+
+    def LDH_from_RAM(self):
+        addr = 0xFF00 + self.memory.read_byte(self.PC)
+        self.registers['A'] = self.memory.read_byte(addr)
+        self.incPC()
+        self.update_clocks(2, 12)
+
+    def LDH_to_RAM(self):
+        addr = 0xFF00 + self.memory.read_byte(self.PC)
+        self.memory.write_byte(addr, self.registers['A'])
+        self.incPC()
+        self.update_clocks(2, 12)
+
+    def LD_HL_n(self):
+        self.memory.write_byte(self.HL, self.memory.read_byte(self.PC))
+        self.incPC()
+        self.update_clocks(2, 12)
+
+    def LD_SP_HL(self):
+        self.registers['SP'] = self.HL
+        self.update_clocks(1, 8)
+
+    #LDI AND LDD (special load and inc/dec instructions)
+    def LDI_to_RAM(self):
+        value = self.HL
+        self.memory.write_byte(value, self.registers['A']) #Load
+
+        value += 1 #Increment
+        value &= 0xFFFF
+
+        self.registers['L'] = value >> 8  #upper nibble
+        self.registers['H'] = value & 255 #lower nibble
+
+        self.update_clocks(1, 8)
+
+    def LDD_to_RAM(self):
+        value = self.HL
+        self.memory.write_byte(value, self.registers['A']) #Load
+
+        value -= 1 #Decrement
+        value &= 0xFFFF
+
+        self.registers['L'] = value >> 8  #upper nibble
+        self.registers['H'] = value & 255 #lower nibble
+
+        self.update_clocks(1, 8)
+
+    def LDI_from_RAM(self):
+        value = self.HL
+        self.registers['A'] = self.memory.read_byte(value)
+
+        value += 1 #Increment
+        value &= 0xFFFF
+
+        self.registers['L'] = value >> 8  #upper nibble
+        self.registers['H'] = value & 255 #lower nibble
+
+        self.update_clocks(1, 8)
+
+    def LDD_from_RAM(self):
+        value = self.HL
+        self.registers['A'] = self.memory.read_byte(value)
+
+        value -= 1 #Increment
+        value &= 0xFFFF
+
+        self.registers['L'] = value >> 8  #upper nibble
+        self.registers['H'] = value & 255 #lower nibble
+
+        self.update_clocks(1, 8)
+
+        #CP (compare) INSTRUCTIONS
+
+    def CP(self, r):
+        value = self.registers[r]
+        result = self.registers['A'] - value
+        self.set_flag('H', ((value ^ self.registers['A'] ^ result) & 16) > 0)
+        self.set_flag('N', 1)
+        self.set_flag('C', result < 0)
+        self.set_flag('Z', result == 0)
+        self.update_clocks(1, 4)
+
+    def CP_HL(self):
+        value = self.memory.read_byte(self.HL)
+        result = self.registers['A'] - value
+        self.set_flag('H', ((value ^ self.registers['A'] ^ result) & 16) > 0)
+        self.set_flag('N', 1)
+        self.set_flag('C', result < 0)
+        self.set_flag('Z', result == 0)
+        self.update_clocks(1, 8)
+
+    def CP_n(self):
+        value = self.memory.read_byte(self.PC)
+        result = self.registers['A'] - value
+        self.set_flag('H', ((value ^ self.registers['A'] ^ result) & 16) > 0)
+        self.set_flag('N', 1)
+        self.set_flag('C', result < 0)
+        self.set_flag('Z', result == 0)
+        self.incPC()
+        self.update_clocks(2, 8)
+
+    #JR (relative jump) INSTRUCTIONS
+
+    def JR(self):
+        jump = self.unsigned_to_signed(self.memory.read_byte(self.PC))
+        self.incPC(jump + 1)
+        self.update_clocks(2, 12)
+
+    def JR_Z(self):
+        if self.get_flag('Z'):
+            jump = self.unsigned_to_signed(self.memory.read_byte(self.PC))
+            self.incPC(jump + 1)
+            self.update_clocks(2, 12)
+        else:
+            self.incPC()
+            self.update_clocks(2, 8)
+
+    def JR_NZ(self):
+        if not self.get_flag('Z'):
+            jump = self.unsigned_to_signed(self.memory.read_byte(self.PC))
+            self.incPC(jump + 1)
+            self.update_clocks(2, 12)
+        else:
+            self.incPC()
+            self.update_clocks(2, 8)
+
+    def JR_C(self):
+        if self.get_flag('C'):
+            jump = self.unsigned_to_signed(self.memory.read_byte(self.PC))
+            self.incPC(jump + 1)
+            self.update_clocks(2, 12)
+        else:
+            self.incPC()
+            self.update_clocks(2, 8)
+
+    def JR_NC(self):
+        if not self.get_flag('C'):
+            jump = self.unsigned_to_signed(self.memory.read_byte(self.PC))
+            self.incPC(jump + 1)
+            self.update_clocks(2, 12)
+        else:
+            self.incPC()
+            self.update_clocks(2, 8)
+
+    #JP (jump) INSTRUCTIONS
+
+    def JP(self):
+        self.registers['PC'] = self.memory.read_word(self.PC)
+        self.update_clocks(3, 16)
+
+    def JP_HL(self):
+        self.registers['PC'] = self.memory.read_word(self.HL)
+        self.update_clocks(1, 4)
+
+    def JP_Z(self):
+        if self.get_flag('Z'):
+            self.registers['PC'] = self.memory.read_word(self.PC)
+            self.update_clocks(3, 16)
+        else:
+            self.incPC(2)
+            self.update_clocks(3, 12)
+
+    def JP_NZ(self):
+        if not self.get_flag('Z'):
+            self.registers['PC'] = self.memory.read_word(self.PC)
+            self.update_clocks(3, 16)
+        else:
+            self.incPC(2)
+            self.update_clocks(3, 12)
+
+    def JP_C(self):
+        if self.get_flag('C'):
+            self.registers['PC'] = self.memory.read_word(self.PC)
+            self.update_clocks(3, 16)
+        else:
+            self.incPC(2)
+            self.update_clocks(3, 12)
+
+    def JP_NC(self):
+        if not self.get_flag('C'):
+            self.registers['PC'] = self.memory.read_word(self.PC)
+            self.update_clocks(3, 16)
+        else:
+            self.incPC(2)
+            self.update_clocks(3, 12)
+
+
+
+    ### CONTROL STRUCTURES ###
+
+    def CALL(self):
+        addr = self.memory.read_word(self.PC)
+        self.registers['SP'] -= 2
+        self.memory.write_word(self.SP, self.PC+2)
+        self.registers['PC'] = addr
+        self.update_clocks(3, 24)
+
+    def CALL_Z(self):
+        if self.get_flag('Z'):
+            addr = self.memory.read_word(self.PC)
+            self.memory.write_word(self.SP, self.PC+2)
+            self.registers['SP'] -= 2
+            self.registers['PC'] = addr
+            self.update_clocks(3, 24)
+        else:
+            self.incPC(2)
+            self.update_clocks(3, 12)
+
+    def CALL_NZ(self):
+        if not self.get_flag('Z'):
+            addr = self.memory.read_word(self.PC)
+            self.memory.write_word(self.SP, self.PC+2)
+            self.registers['SP'] -= 2
+            self.registers['PC'] = addr
+            self.update_clocks(3, 24)
+        else:
+            self.incPC(2)
+            self.update_clocks(3, 12)
+
+    def CALL_C(self):
+        if self.get_flag('C'):
+            addr = self.memory.read_word(self.PC)
+            self.memory.write_word(self.SP, self.PC+2)
+            self.registers['SP'] -= 2
+            self.registers['PC'] = addr
+            self.update_clocks(3, 24)
+        else:
+            self.incPC(2)
+            self.update_clocks(3, 12)
+
+    def CALL_NC(self):
+        if not self.get_flag('C'):
+            addr = self.memory.read_word(self.PC)
+            self.memory.write_word(self.SP, self.PC+2)
+            self.registers['SP'] -= 2
+            self.registers['PC'] = addr
+            self.update_clocks(3, 24)
+        else:
+            self.incPC(2)
+            self.update_clocks(3, 12)
+
+    def PUSH(self, src):
+        src_strong, src_weak = self.registers[src[1]], self.registers[src[0]]
+        addr = (src_strong << 8) | src_weak
+        self.registers['SP'] -= 2
+        self.memory.write_word(self.SP, addr)
+        self.update_clocks(1, 16)
+
+    def POP(self, dst):
+        addr = self.memory.read_word(self.SP)
+        self.registers['SP'] += 2
+        strong, weak = addr >> 8, addr & 255
+        self.registers[dst[1]], self.registers[dst[0]] = strong, weak
+        self.update_clocks(1, 12)
+
+    def RET(self):
+        self.registers['PC'] = self.memory.read_word(self.SP)
+        self.registers['SP'] += 2
+        self.update_clocks(1, 16)
+
+    def RET_Z(self):
+        if self.get_flag('Z'):
+            self.registers['PC'] = self.memory.read_word(self.SP)
+            self.registers['SP'] += 2
+            self.update_clocks(1, 20)
+        else:
+            self.update_clocks(1, 8)
+
+    def RET_NZ(self):
+        if not self.get_flag('Z'):
+            self.registers['PC'] = self.memory.read_word(self.SP)
+            self.registers['SP'] += 2
+            self.update_clocks(1, 20)
+        else:
+            self.update_clocks(1, 8)
+
+    def RET_C(self):
+        if self.get_flag('C'):
+            self.registers['PC'] = self.memory.read_word(self.SP)
+            self.registers['SP'] += 2
+            self.update_clocks(1, 20)
+        else:
+            self.update_clocks(1, 8)
+
+    def RET_NC(self):
+        if not self.get_flag('Z'):
+            self.registers['PC'] = self.memory.read_word(self.SP)
+            self.registers['SP'] += 2
+            self.update_clocks(1, 20)
+        else:
+            self.update_clocks(1, 8)
+
+    def RST(self, addr):
+        self.registers['SP'] -= 2
+        self.memory.write_word(self.SP, self.PC+2)
+        self.registers['PC'] = addr
+        self.update_clocks(1, 16)
+
+    #INTERRUPTS CONTROL INSTRUCTIONS
+
+    def EI(self):
+        pass #TODO
+
+    def DI(self):
+        pass #TODO
+
+    def RETI(self):
+        self.registers['PC'] = self.memory.read_word(self.SP)
+        self.registers['SP'] += 2
+        self.update_clocks(1, 16)
+        #TODO interrupt
+
+    #DAA CORRECTION INSTRUCTION
+
+    def DAA(self):
+        if self.registers['A'] > 0x99 or self.get_flag('C'):
+            correction = 96
+            self.set_flag('C', 1)
+        else:
+            correction = 0
+            self.set_flag('C', 0)
+
+        if self.registers['A']&15 > 9 or self.get_flag('H'):
+            correction += 6
+
+        if self.get_flag('N'):
+            value = self.registers['A'] - correction
+        else:
+            value = self.registers['A'] + correction
+
+        self.set_flag('H', ((correction ^ self.registers['A'] ^ value) & 16) > 0)
+        self.set_flag('Z', 1)
+
+    #RL, RR, RLC and RRC (rotate with/without carry) INSTRUCTIONS for register A
+    def RL_A(self):
+        value = self.registers['A']
+        value = value << 1 | self.get_flag('C')
+
+        self.reset_flags()
+        self.set_flag('C', value & 256)
+
+        value &= 255
+        self.registers['A'] = value
+        self.update_clocks(1, 4)
+
+    def RLC_A(self):
+        value = self.registers['A']
+        value = value << 1
+        value |= (value & 256)
+        self.set_flag('C', value & 256)
+
+        value &= 255
+        self.registers['A'] = value
+        self.update_clocks(1, 4)
+
+    def RR_A(self):
+        value = self.registers['A']
+
+        if self.get_flag('C'):
+            value |= (1 << 8)
+        self.reset_flags()
+        self.set_flag('C', value & 1)
+        value = value >> 1
+
+        self.registers['A'] = value
+        self.update_clocks(1, 4)
+
+    def RRC_A(self):
+        value = self.registers['A']
+
+        self.reset_flags()
+        carry = value & 1
+        value = value >> 1
+        value |= (carry << 7)
+        self.set_flag('C', carry)
+
+        self.registers['A'] = value
+        self.update_clocks(1, 4)
+
+    """ CB INSTRUCTIONS """
+
+    #BIT CHECKING INSTRUCTIONS
+
+    def BIT(self, n, r):
+        self.set_flag('Z', self.registers[r] & (1 << n) == 0)
+        self.set_flag('H', 1)
+        self.set_flag('N', 0)
+        self.update_clocks(2, 8)
+
+    def BIT_HL(self, n):
+        self.set_flag('Z', self.memory.read_byte(self.HL) & (1 << n) == 0)
+        self.set_flag('H', 1)
+        self.set_flag('N', 0)
+        self.update_clocks(2, 16)
+
+    def RL(self, r):
+        value = self.registers[r]
+        value = value << 1 | self.get_flag('C')
+
+        self.reset_flags()
+        self.set_flag('C', value & 256)
+        self.set_flag('Z', value == 0)
+
+        value &= 255
+        self.registers[r] = value
+        self.update_clocks(2, 8)
+
+    def RL_HL(self):
+        value = self.memory.read_byte(self.HL)
+        value = value << 1 | self.get_flag('C')
+
+        self.reset_flags()
+        self.set_flag('C', value & 256)
+        self.set_flag('Z', value == 0)
+
+        value &= 255
+        self.memory.write_byte(self.HL, value)
+        self.update_clocks(2, 16)
+
+    def RLC(self, r):
+        value = self.registers[r]
+        value = value << 1
+        value |= (value & 256)
+        self.set_flag('Z', value == 0)
+        self.set_flag('C', value & 256)
+
+        value &= 255
+        self.registers[r] = value
+        self.update_clocks(2, 8)
+
+    def RLC_HL(self, r):
+        value = self.memory.read_byte(self.HL)
+        value = value << 1
+        value |= (value & 256)
+        self.set_flag('Z', value == 0)
+        self.set_flag('C', value & 256)
+
+        value &= 255
+        self.memory.write_byte(self.HL, value)
+        self.update_clocks(2, 16)
+
+    def RR(self, r):
+        value = self.registers[r]
+
+        if self.get_flag('C'):
+            value |= (1 << 8)
+        self.reset_flags()
+        self.set_flag('C', value & 1)
+        value = value >> 1
+        self.set_flag('Z', value == 0)
+
+        self.registers[r] = value
+        self.update_clocks(2, 8)
+
+    def RRC(self, r):
+        value = self.registers[r]
+
+        self.reset_flags()
+        carry = value & 1
+        value = value >> 1
+        value |= (carry << 7)
+        self.set_flag('C', carry)
+        self.set_flag('Z', value == 0)
+
+        self.registers[r] = value
         self.update_clocks(2, 8)
 
     """ OPCODES LIST """
@@ -190,16 +886,16 @@ class Z80(object):
     OP_03 = lambda self: self.INC16('BC')
     OP_04 = lambda self: self.INC('B')
     OP_05 = lambda self: self.DEC('B')
-    OP_06 = lambda self: self.LD('B','ROM')
-    OP_07 = lambda self: self.RLC('A')
-    OP_08 = lambda self: self.LD('SP','ROM')
-    OP_09 = lambda self: self.ADD16('BC','HL')
-    OP_0A = lambda self: self.LD('A','BC')
+    OP_06 = lambda self: self.LD_n('B')
+    OP_07 = lambda self: self.RLC_A()
+    OP_08 = lambda self: self.LD_nn_SP()
+    OP_09 = lambda self: self.ADD16('BC')
+    OP_0A = lambda self: self.LD_from_addr('A','BC')
     OP_0B = lambda self: self.DEC16('BC')
     OP_0C = lambda self: self.INC('C')
     OP_0D = lambda self: self.DEC('C')
-    OP_0E = lambda self: self.LD('C','ROM')
-    OP_0F = lambda self: self.RRC('A')
+    OP_0E = lambda self: self.LD_n('C')
+    OP_0F = lambda self: self.RRC_A()
 
     OP_10 = lambda self: setattr(self, 'stop', True)
     OP_11 = lambda self: self.LD16_nn('DE')
@@ -207,49 +903,49 @@ class Z80(object):
     OP_13 = lambda self: self.INC16('DE')
     OP_14 = lambda self: self.INC('D')
     OP_15 = lambda self: self.DEC('D')
-    OP_16 = lambda self: self.LD('D','ROM')
-    OP_17 = lambda self: self.RL('A')
+    OP_16 = lambda self: self.LD_n('D')
+    OP_17 = lambda self: self.RL_A()
     OP_18 = lambda self: self.JR()
-    OP_19 = lambda self: self.ADD16('HL','DE')
-    OP_1A = lambda self: self.LD('A','DE')
+    OP_19 = lambda self: self.ADD16('DE')
+    OP_1A = lambda self: self.LD_from_addr('A','DE')
     OP_1B = lambda self: self.DEC16('DE')
     OP_1C = lambda self: self.INC('E')
     OP_1D = lambda self: self.DEC('E')
-    OP_1E = lambda self: self.LD('E','ROM')
-    OP_1F = lambda self: self.RR('A')
+    OP_1E = lambda self: self.LD_n('E')
+    OP_1F = lambda self: self.RR_A()
 
-    OP_20 = lambda self: self.JR('NZ')
+    OP_20 = lambda self: self.JR_NZ()
     OP_21 = lambda self: self.LD16_nn('HL')
-    OP_22 = lambda self: self.LDI('HL','A')
+    OP_22 = lambda self: self.LDI_to_RAM()
     OP_23 = lambda self: self.INC16('HL')
     OP_24 = lambda self: self.INC('H')
     OP_25 = lambda self: self.DEC('H')
-    OP_26 = lambda self: self.LD('H','ROM')
+    OP_26 = lambda self: self.LD_n('H')
     OP_27 = lambda self: self.DAA()
-    OP_28 = lambda self: self.JR('Z')
-    OP_29 = lambda self: self.ADD16('HL','HL')
-    OP_2A = lambda self: self.LDI('A','HL')
+    OP_28 = lambda self: self.JR_Z()
+    OP_29 = lambda self: self.ADD16('HL')
+    OP_2A = lambda self: self.LDI_from_RAM()
     OP_2B = lambda self: self.DEC16('HL')
     OP_2C = lambda self: self.INC('L')
     OP_2D = lambda self: self.DEC('L')
-    OP_2E = lambda self: self.LD('L','ROM')
+    OP_2E = lambda self: self.LD_n('L')
     OP_2F = lambda self: self.CPL()
 
-    OP_30 = lambda self: self.JR('NC')
+    OP_30 = lambda self: self.JR_NC()
     OP_31 = lambda self: self.LD_SP_nn()
-    OP_32 = lambda self: self.LDD('HL','A')
-    OP_33 = lambda self: (self.reg.__setitem__('SP', self.reg['SP']+1&65535)) #INC SP #TODO FLAGS
+    OP_32 = lambda self: self.LDD_to_RAM()
+    OP_33 = lambda self: self.INC_SP()
     OP_34 = lambda self: self.INC_addr(self.HL)
     OP_35 = lambda self: self.DEC_addr(self.HL)
     OP_36 = lambda self: self.LD_HL_n()
     OP_37 = lambda self: (self.set_flag('C',True), self.OP_00())
-    OP_38 = lambda self: self.JR('C')
-    OP_39 = lambda self: self.ADD16('HL','SP')
-    OP_3A = lambda self: self.LDD('A','HL')
-    OP_3B = lambda self: (self.reg.__setitem__('SP', self.reg['SP']-1&65535)) #DEC SP #TODO FLAGS
+    OP_38 = lambda self: self.JR_C()
+    OP_39 = lambda self: self.ADD16('SP')
+    OP_3A = lambda self: self.LDD_from_RAM()
+    OP_3B = lambda self: self.DEC_SP()
     OP_3C = lambda self: self.INC('A')
     OP_3D = lambda self: self.DEC('A')
-    OP_3E = lambda self: self.LD('A','ROM')
+    OP_3E = lambda self: self.LD_n('A')
     OP_3F = lambda self: (self.set_flag('C',False), self.OP_00())
 
     OP_40 = lambda self: self.LD('B','B')
@@ -326,7 +1022,7 @@ class Z80(object):
     OP_83 = lambda self: self.ADD('E')
     OP_84 = lambda self: self.ADD('H')
     OP_85 = lambda self: self.ADD('L')
-    OP_86 = lambda self: self.ADD('HL')
+    OP_86 = lambda self: self.ADD_HL()
     OP_87 = lambda self: self.ADD('A')
     OP_88 = lambda self: self.ADC('B')
     OP_89 = lambda self: self.ADC('C')
@@ -334,7 +1030,7 @@ class Z80(object):
     OP_8B = lambda self: self.ADC('E')
     OP_8C = lambda self: self.ADC('H')
     OP_8D = lambda self: self.ADC('L')
-    OP_8E = lambda self: self.ADC('HL')
+    OP_8E = lambda self: self.ADC_HL()
     OP_8F = lambda self: self.ADC('A')
 
     OP_90 = lambda self: self.SUB('B')
@@ -343,7 +1039,7 @@ class Z80(object):
     OP_93 = lambda self: self.SUB('E')
     OP_94 = lambda self: self.SUB('H')
     OP_95 = lambda self: self.SUB('L')
-    OP_96 = lambda self: self.SUB('HL')
+    OP_96 = lambda self: self.SUB_HL()
     OP_97 = lambda self: self.SUB('A')
     OP_98 = lambda self: self.SBC('B')
     OP_99 = lambda self: self.SBC('C')
@@ -351,7 +1047,7 @@ class Z80(object):
     OP_9B = lambda self: self.SBC('E')
     OP_9C = lambda self: self.SBC('H')
     OP_9D = lambda self: self.SBC('L')
-    OP_9E = lambda self: self.SBC('HL')
+    OP_9E = lambda self: self.SBC_HL()
     OP_9F = lambda self: self.SBC('A')
 
     OP_A0 = lambda self: self.AND('B')
@@ -360,7 +1056,7 @@ class Z80(object):
     OP_A3 = lambda self: self.AND('E')
     OP_A4 = lambda self: self.AND('H')
     OP_A5 = lambda self: self.AND('L')
-    OP_A6 = lambda self: self.AND('HL')
+    OP_A6 = lambda self: self.AND_HL()
     OP_A7 = lambda self: self.AND('A')
     OP_A8 = lambda self: self.XOR('B')
     OP_A9 = lambda self: self.XOR('C')
@@ -377,7 +1073,7 @@ class Z80(object):
     OP_B3 = lambda self: self.OR('E')
     OP_B4 = lambda self: self.OR('H')
     OP_B5 = lambda self: self.OR('L')
-    OP_B6 = lambda self: self.OR('HL')
+    OP_B6 = lambda self: self.OR_HL()
     OP_B7 = lambda self: self.OR('A')
     OP_B8 = lambda self: self.CP('B')
     OP_B9 = lambda self: self.CP('C')
@@ -385,51 +1081,51 @@ class Z80(object):
     OP_BB = lambda self: self.CP('E')
     OP_BC = lambda self: self.CP('H')
     OP_BD = lambda self: self.CP('L')
-    OP_BE = lambda self: self.CP('HL')
+    OP_BE = lambda self: self.CP_HL()
     OP_BF = lambda self: self.CP('A')
 
-    OP_C0 = lambda self: self.RET('NZ')
+    OP_C0 = lambda self: self.RET_NZ()
     OP_C1 = lambda self: self.POP('BC')
-    OP_C2 = lambda self: self.JP('NZ')
+    OP_C2 = lambda self: self.JP_NZ()
     OP_C3 = lambda self: self.JP()
-    OP_C4 = lambda self: self.CALL('NZ')
+    OP_C4 = lambda self: self.CALL_NZ()
     OP_C5 = lambda self: self.PUSH('BC')
-    OP_C6 = lambda self: self.ADD('ROM')
+    OP_C6 = lambda self: self.ADD_n()
     OP_C7 = lambda self: self.RST(0x0)
-    OP_C8 = lambda self: self.RET('Z')
+    OP_C8 = lambda self: self.RET_Z()
     OP_C9 = lambda self: self.RET()
-    OP_CA = lambda self: self.JP('Z')
+    OP_CA = lambda self: self.JP_Z()
     #CB operations
-    OP_CC = lambda self: self.CALL('Z')
+    OP_CC = lambda self: self.CALL_Z()
     OP_CD = lambda self: self.CALL()
-    OP_CE = lambda self: self.ADC('ROM')
+    OP_CE = lambda self: self.ADC_n()
     OP_CF = lambda self: self.RST(0x8)
 
-    OP_D0 = lambda self: self.RET('NC')
+    OP_D0 = lambda self: self.RET_NC()
     OP_D1 = lambda self: self.POP('DE')
-    OP_D2 = lambda self: self.JP('NC')
+    OP_D2 = lambda self: self.JP_NC()
     #OP_D3 XX
-    OP_D4 = lambda self: self.CALL('NC')
+    OP_D4 = lambda self: self.CALL_NC()
     OP_D5 = lambda self: self.PUSH('DE')
-    OP_D6 = lambda self: self.SUB('ROM')
+    OP_D6 = lambda self: self.SUB_n()
     OP_D7 = lambda self: self.RST(0x10)
-    OP_D8 = lambda self: self.RET('C')
+    OP_D8 = lambda self: self.RET_C()
     OP_D9 = lambda self: self.RETI()
-    OP_DA = lambda self: self.JP('C')
+    OP_DA = lambda self: self.JP_C()
     #OP_DB XX
-    OP_DC = lambda self: self.CALL('C')
+    OP_DC = lambda self: self.CALL_C()
     #OP_DD XX
     OP_DE = lambda self: self.SBC('ROM')
     OP_DF = lambda self: self.RST(0x18)
 
 
-    OP_E0 = lambda self: self.LD_to_RAM()
+    OP_E0 = lambda self: self.LDH_to_RAM()
     OP_E1 = lambda self: self.POP('HL')
     OP_E2 = lambda self: self.LDH_C()
     #OP_E3 XX
     #OP_E4 XX
     OP_E5 = lambda self: self.PUSH('HL')
-    OP_E6 = lambda self: self.AND('ROM')
+    OP_E6 = lambda self: self.AND_n()
     OP_E7 = lambda self: self.RST(0x20)
     OP_E8 = lambda self: self.ADD_SP()
     OP_E9 = lambda self: self.JP_HL()
@@ -440,22 +1136,22 @@ class Z80(object):
     OP_EE = lambda self: self.XOR_n()
     OP_EF = lambda self: self.RST(0x28)
 
-    OP_F0 = lambda self: self.LD('A','ROM', 0xFF00)
+    OP_F0 = lambda self: self.LDH_from_RAM()
     OP_F1 = lambda self: self.POP('AF')
     #OP_F2 XX
     OP_F3 = lambda self: self.DI()
     #OP_F4 XX
     OP_F5 = lambda self: self.PUSH('AF')
-    OP_F6 = lambda self: self.OR('ROM')
+    OP_F6 = lambda self: self.OR_n()
     OP_F7 = lambda self: self.RST(0x30)
-    OP_F8 = lambda self: self.ADD_SP(save=True)
-    OP_F9 = lambda self: self.LD_SP()
+    OP_F8 = lambda self: self.ADD_SP_to_HL()
+    OP_F9 = lambda self: self.LD_SP_HL()
     OP_FA = lambda self: self.LD('A','nn')
     OP_FB = lambda self: self.EI()
     #OP_FC XX
     #OP_FD XX
-    OP_FE = lambda self: self.CP('ROM')
-    OP_FF = lambda self: (self.reset(), self.reg.__setitem__('PC', 0x38+1))
+    OP_FE = lambda self: self.CP_n()
+    OP_FF = lambda self: self.RST(0x38)
 
     CB_00 = lambda self: self.RLC('B')
     CB_01 = lambda self: self.RLC('C')
@@ -480,7 +1176,7 @@ class Z80(object):
     CB_13 = lambda self: self.RL('E')
     CB_14 = lambda self: self.RL('H')
     CB_15 = lambda self: self.RL('L')
-    CB_16 = lambda self: self.RL('HL')
+    CB_16 = lambda self: self.RL_HL()
     CB_17 = lambda self: self.RR('A')
     CB_18 = lambda self: self.RR('B')
     CB_19 = lambda self: self.RR('C')
@@ -531,7 +1227,7 @@ class Z80(object):
     CB_43 = lambda self: self.BIT(0,'E')
     CB_44 = lambda self: self.BIT(0,'H')
     CB_45 = lambda self: self.BIT(0,'L')
-    CB_46 = lambda self: self.BIT(0,'HL')
+    CB_46 = lambda self: self.BIT_HL(0)
     CB_47 = lambda self: self.BIT(0,'A')
     CB_48 = lambda self: self.BIT(1,'B')
     CB_49 = lambda self: self.BIT(1,'C')
@@ -548,7 +1244,7 @@ class Z80(object):
     CB_53 = lambda self: self.BIT(2,'E')
     CB_54 = lambda self: self.BIT(2,'H')
     CB_55 = lambda self: self.BIT(2,'L')
-    CB_56 = lambda self: self.BIT(2,'HL')
+    CB_56 = lambda self: self.BIT_HL(2)
     CB_57 = lambda self: self.BIT(2,'A')
     CB_58 = lambda self: self.BIT(3,'B')
     CB_59 = lambda self: self.BIT(3,'C')
@@ -556,7 +1252,7 @@ class Z80(object):
     CB_5B = lambda self: self.BIT(3,'E')
     CB_5C = lambda self: self.BIT(3,'H')
     CB_5D = lambda self: self.BIT(3,'L')
-    CB_5E = lambda self: self.BIT(3,'HL')
+    CB_5E = lambda self: self.BIT_HL(3)
     CB_5F = lambda self: self.BIT(3,'A')
 
     CB_60 = lambda self: self.BIT(4,'B')
@@ -565,7 +1261,7 @@ class Z80(object):
     CB_63 = lambda self: self.BIT(4,'E')
     CB_64 = lambda self: self.BIT(4,'H')
     CB_65 = lambda self: self.BIT(4,'L')
-    CB_66 = lambda self: self.BIT(4,'HL')
+    CB_66 = lambda self: self.BIT_HL(4)
     CB_67 = lambda self: self.BIT(4,'A')
     CB_68 = lambda self: self.BIT(5,'B')
     CB_69 = lambda self: self.BIT(5,'C')
@@ -573,7 +1269,7 @@ class Z80(object):
     CB_6B = lambda self: self.BIT(5,'E')
     CB_6C = lambda self: self.BIT(5,'H')
     CB_6D = lambda self: self.BIT(5,'L')
-    CB_6E = lambda self: self.BIT(5,'HL')
+    CB_6E = lambda self: self.BIT_HL(5)
     CB_6F = lambda self: self.BIT(5,'A')
 
     CB_70 = lambda self: self.BIT(6,'B')
@@ -582,7 +1278,7 @@ class Z80(object):
     CB_73 = lambda self: self.BIT(6,'E')
     CB_74 = lambda self: self.BIT(6,'H')
     CB_75 = lambda self: self.BIT(6,'L')
-    CB_76 = lambda self: self.BIT(6,'HL')
+    CB_76 = lambda self: self.BIT_HL(6)
     CB_77 = lambda self: self.BIT(6,'A')
     CB_78 = lambda self: self.BIT(7,'B')
     CB_79 = lambda self: self.BIT(7,'C')
@@ -590,7 +1286,7 @@ class Z80(object):
     CB_7B = lambda self: self.BIT(7,'E')
     CB_7C = lambda self: self.BIT(7,'H')
     CB_7D = lambda self: self.BIT(7,'L')
-    CB_7E = lambda self: self.BIT(7,'HL')
+    CB_7E = lambda self: self.BIT_HL(7)
     CB_7F = lambda self: self.BIT(7,'A')
 
     CB_80 = lambda self: self.RES(0,'B')
@@ -746,7 +1442,7 @@ class Z80(object):
             OP_C0, OP_C1, OP_C2, OP_C3, OP_C4, OP_C5, OP_C6, OP_C7, OP_C8, OP_C9, OP_CA, None , OP_CC, OP_CD, OP_CE, OP_CF,
             OP_D0, OP_D1, OP_D2, None , OP_D4, OP_D5, OP_D6, OP_D7, OP_D8, OP_D9, OP_DA, None , OP_DC, None , None , OP_DF,
             OP_E0, OP_E1, OP_E2, None , None , OP_E5, OP_E6, OP_E7, OP_E8, OP_E9, OP_EA, None , None , None , None , OP_EF,
-            OP_F0, OP_F1, None , OP_F3, None , OP_F5, OP_F6, OP_F7, OP_F8, OP_F9, OP_FA, OP_FB, None , None , None , OP_FF,
+            OP_F0, OP_F1, None , OP_F3, None , OP_F5, OP_F6, OP_F7, OP_F8, OP_F9, OP_FA, OP_FB, None , None , OP_FE, OP_FF,
     ]
 
     CB_OPCODES = [
