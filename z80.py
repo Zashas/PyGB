@@ -806,6 +806,8 @@ class Z80(object):
         self.set_flag('N', 0)
         self.update_clocks(2, 16)
 
+    #RL, RC, RLC, RRC (rotating left/right, with/without carry) INSTRUCTIONS
+
     def RL(self, r):
         value = self.registers[r]
         value = value << 1 | self.get_flag('C')
@@ -841,7 +843,7 @@ class Z80(object):
         self.registers[r] = value
         self.update_clocks(2, 8)
 
-    def RLC_HL(self, r):
+    def RLC_HL(self):
         value = self.memory.read_byte(self.HL)
         value = value << 1
         value |= (value & 256)
@@ -865,6 +867,19 @@ class Z80(object):
         self.registers[r] = value
         self.update_clocks(2, 8)
 
+    def RR_HL(self):
+        value = self.memory.read_byte(self.HL)
+
+        if self.get_flag('C'):
+            value |= (1 << 8)
+        self.reset_flags()
+        self.set_flag('C', value & 1)
+        value = value >> 1
+        self.set_flag('Z', value == 0)
+
+        self.memory.write_byte(self.HL, value)
+        self.update_clocks(2, 8)
+
     def RRC(self, r):
         value = self.registers[r]
 
@@ -877,6 +892,120 @@ class Z80(object):
 
         self.registers[r] = value
         self.update_clocks(2, 8)
+
+    def RRC_HL(self):
+        value = self.memory.read_byte(self.HL)
+
+        self.reset_flags()
+        carry = value & 1
+        value = value >> 1
+        value |= (carry << 7)
+        self.set_flag('C', carry)
+        self.set_flag('Z', value == 0)
+
+        self.memory.write_byte(self.HL, value)
+        self.update_clocks(2, 8)
+
+
+    #RES (reset/clear bit) INSTRUCTIONS
+
+    def RES(self, bit, r):
+        self.registers[r] &= (255- (1 << bit))
+        self.update_clocks(2, 8)
+
+    def RES_HL(self, bit):
+        value = self.memory.read_byte(self.HL)
+        value &= (255- (1 << bit))
+        self.memory.write_byte(self.HL, value)
+        self.update_clocks(2, 16)
+
+    #SET (setting bit) INSTRUCTIONS
+
+    def SET(self, bit, r):
+        self.registers[r] |= (1 << bit)
+        self.update_clocks(2, 8)
+
+    def SET_HL(self, bit):
+        value = self.memory.read_byte(self.HL)
+        value |= (1 << bit)
+        self.memory.write_byte(self.HL, value)
+        self.update_clocks(2, 16)
+
+    #SWAP (swapping nibbles) INSTRUCTIONS
+
+    def SWAP(self, r):
+        value = self.registers[r]
+        strong, weak = value >> 4, value & 15
+        value = (weak << 4) | strong
+        self.registers[r] = value
+        self.set_flag('Z', value == 0)
+
+    def SWAP_HL(self):
+        value = self.memory.read_byte(self.HL)
+        strong, weak = value >> 4, value & 15
+        value = (weak << 4) | strong
+        self.reset_flags()
+        self.memory.write_byte(self.HL, value)
+        self.set_flag('Z', value == 0)
+
+    #SRL, SLA and SLA (shift left/right, logical/arithmetic) INSTRUCTIONS
+
+    def SLA(self, r):
+        value = self.registers[r]
+        value = value << 1
+        self.reset_flags()
+        self.set_flag('C', value & 256)
+        value &= 255
+        self.registers[r] = value
+        self.set_flag('Z', value == 0)
+        self.update_clocks(2, 8)
+
+    def SLA_HL(self):
+        value = self.memory.read_byte(self.HL)
+        value = value << 1
+        self.reset_flags()
+        self.set_flag('C', value & 256)
+        value &= 255
+        self.memory.write_byte(self.HL, value)
+        self.set_flag('Z', value == 0)
+        self.update_clocks(2, 16)
+
+    def SRA(self, r):
+        value = self.registers[r]
+        self.reset_flags()
+        self.set_flag('C', value&1)
+        value = (value >> 1) | (value & (1 << 7))
+        self.set_flag('Z', value == 0)
+        self.registers[r] = value
+        self.update_clocks(2, 8)
+
+    def SRA_HL(self):
+        value = self.memory.read_byte(self.HL)
+        self.reset_flags()
+        self.set_flag('C', value&1)
+        value = (value >> 1) | (value & (1 << 7))
+        self.set_flag('Z', value == 0)
+        self.memory.write_byte(self.HL, value)
+        self.update_clocks(2, 16)
+
+    def SRL(self, r):
+        value = self.registers[r]
+        self.reset_flags()
+        self.set_flag('C', value&1)
+        value = (value >> 1)
+        self.set_flag('Z', value == 0)
+        self.registers[r] = value
+        self.update_clocks(2, 8)
+
+    def SRL_HL(self):
+        value = self.memory.read_byte(self.HL)
+        self.reset_flags()
+        self.set_flag('C', value&1)
+        value = (value >> 1)
+        self.set_flag('Z', value == 0)
+        self.memory.write_byte(self.HL, value)
+        self.update_clocks(2, 16)
+
 
     """ OPCODES LIST """
 
@@ -1159,7 +1288,7 @@ class Z80(object):
     CB_03 = lambda self: self.RLC('E')
     CB_04 = lambda self: self.RLC('H')
     CB_05 = lambda self: self.RLC('L')
-    CB_06 = lambda self: self.RLC('HL')
+    CB_06 = lambda self: self.RLC_HL()
     CB_07 = lambda self: self.RRC('A')
     CB_08 = lambda self: self.RRC('B')
     CB_09 = lambda self: self.RRC('C')
@@ -1167,7 +1296,7 @@ class Z80(object):
     CB_0B = lambda self: self.RRC('E')
     CB_0C = lambda self: self.RRC('H')
     CB_0D = lambda self: self.RRC('L')
-    CB_0E = lambda self: self.RRC('HL')
+    CB_0E = lambda self: self.RRC_HL()
     CB_0F = lambda self: self.RRC('A')
 
     CB_10 = lambda self: self.RL('B')
@@ -1184,7 +1313,7 @@ class Z80(object):
     CB_1B = lambda self: self.RR('E')
     CB_1C = lambda self: self.RR('H')
     CB_1D = lambda self: self.RR('L')
-    CB_1E = lambda self: self.RR('HL')
+    CB_1E = lambda self: self.RR_HL()
     CB_1F = lambda self: self.RR('A')
 
     CB_20 = lambda self: self.SLA('B')
@@ -1193,7 +1322,7 @@ class Z80(object):
     CB_23 = lambda self: self.SLA('E')
     CB_24 = lambda self: self.SLA('H')
     CB_25 = lambda self: self.SLA('L')
-    CB_26 = lambda self: self.SLA('HL')
+    CB_26 = lambda self: self.SLA_HL()
     CB_27 = lambda self: self.SRA('A')
     CB_28 = lambda self: self.SRA('B')
     CB_29 = lambda self: self.SRA('C')
@@ -1201,7 +1330,7 @@ class Z80(object):
     CB_2B = lambda self: self.SRA('E')
     CB_2C = lambda self: self.SRA('H')
     CB_2D = lambda self: self.SRA('L')
-    CB_2E = lambda self: self.SRA('HL')
+    CB_2E = lambda self: self.SRA_HL()
     CB_2F = lambda self: self.SRA('A')
 
     CB_30 = lambda self: self.SWAP('B')
@@ -1210,7 +1339,7 @@ class Z80(object):
     CB_33 = lambda self: self.SWAP('E')
     CB_34 = lambda self: self.SWAP('H')
     CB_35 = lambda self: self.SWAP('L')
-    CB_36 = lambda self: self.SWAP('HL')
+    CB_36 = lambda self: self.SWAP_HL()
     CB_37 = lambda self: self.SWAP('A')
     CB_38 = lambda self: self.SRL('B')
     CB_39 = lambda self: self.SRL('C')
@@ -1218,7 +1347,7 @@ class Z80(object):
     CB_3B = lambda self: self.SRL('E')
     CB_3C = lambda self: self.SRL('H')
     CB_3D = lambda self: self.SRL('L')
-    CB_3E = lambda self: self.SRL('HL')
+    CB_3E = lambda self: self.SRL_HL()
     CB_3F = lambda self: self.SRL('A')
 
     CB_40 = lambda self: self.BIT(0,'B')
@@ -1235,7 +1364,7 @@ class Z80(object):
     CB_4B = lambda self: self.BIT(1,'E')
     CB_4C = lambda self: self.BIT(1,'H')
     CB_4D = lambda self: self.BIT(1,'L')
-    CB_4E = lambda self: self.BIT(1,'HL')
+    CB_4E = lambda self: self.BIT_HL(1)
     CB_4F = lambda self: self.BIT(1,'A')
 
     CB_50 = lambda self: self.BIT(2,'B')
@@ -1295,7 +1424,7 @@ class Z80(object):
     CB_83 = lambda self: self.RES(0,'E')
     CB_84 = lambda self: self.RES(0,'H')
     CB_85 = lambda self: self.RES(0,'L')
-    CB_86 = lambda self: self.RES(0,'HL')
+    CB_86 = lambda self: self.RES_HL(0)
     CB_87 = lambda self: self.RES(0,'A')
     CB_88 = lambda self: self.RES(1,'B')
     CB_89 = lambda self: self.RES(1,'C')
@@ -1303,7 +1432,7 @@ class Z80(object):
     CB_8B = lambda self: self.RES(1,'E')
     CB_8C = lambda self: self.RES(1,'H')
     CB_8D = lambda self: self.RES(1,'L')
-    CB_8E = lambda self: self.RES(1,'HL')
+    CB_8E = lambda self: self.RES_HL(1)
     CB_8F = lambda self: self.RES(1,'A')
 
     CB_90 = lambda self: self.RES(2,'B')
@@ -1312,7 +1441,7 @@ class Z80(object):
     CB_93 = lambda self: self.RES(2,'E')
     CB_94 = lambda self: self.RES(2,'H')
     CB_95 = lambda self: self.RES(2,'L')
-    CB_96 = lambda self: self.RES(2,'HL')
+    CB_96 = lambda self: self.RES_HL(2,)
     CB_97 = lambda self: self.RES(2,'A')
     CB_98 = lambda self: self.RES(3,'B')
     CB_99 = lambda self: self.RES(3,'C')
@@ -1320,7 +1449,7 @@ class Z80(object):
     CB_9B = lambda self: self.RES(3,'E')
     CB_9C = lambda self: self.RES(3,'H')
     CB_9D = lambda self: self.RES(3,'L')
-    CB_9E = lambda self: self.RES(3,'HL')
+    CB_9E = lambda self: self.RES_HL(3)
     CB_9F = lambda self: self.RES(3,'A')
 
     CB_A0 = lambda self: self.RES(4,'B')
@@ -1329,7 +1458,7 @@ class Z80(object):
     CB_A3 = lambda self: self.RES(4,'E')
     CB_A4 = lambda self: self.RES(4,'H')
     CB_A5 = lambda self: self.RES(4,'L')
-    CB_A6 = lambda self: self.RES(4,'HL')
+    CB_A6 = lambda self: self.RES_HL(4)
     CB_A7 = lambda self: self.RES(4,'A')
     CB_A8 = lambda self: self.RES(5,'B')
     CB_A9 = lambda self: self.RES(5,'C')
@@ -1337,7 +1466,7 @@ class Z80(object):
     CB_AB = lambda self: self.RES(5,'E')
     CB_AC = lambda self: self.RES(5,'H')
     CB_AD = lambda self: self.RES(5,'L')
-    CB_AE = lambda self: self.RES(5,'HL')
+    CB_AE = lambda self: self.RES_HL(5)
     CB_AF = lambda self: self.RES(5,'A')
 
     CB_B0 = lambda self: self.RES(6,'B')
@@ -1346,7 +1475,7 @@ class Z80(object):
     CB_B3 = lambda self: self.RES(6,'E')
     CB_B4 = lambda self: self.RES(6,'H')
     CB_B5 = lambda self: self.RES(6,'L')
-    CB_B6 = lambda self: self.RES(6,'HL')
+    CB_B6 = lambda self: self.RES_HL(6)
     CB_B7 = lambda self: self.RES(6,'A')
     CB_B8 = lambda self: self.RES(7,'B')
     CB_B9 = lambda self: self.RES(7,'C')
@@ -1354,7 +1483,7 @@ class Z80(object):
     CB_BB = lambda self: self.RES(7,'E')
     CB_BC = lambda self: self.RES(7,'H')
     CB_BD = lambda self: self.RES(7,'L')
-    CB_BE = lambda self: self.RES(7,'HL')
+    CB_BE = lambda self: self.RES_HL(7)
     CB_BF = lambda self: self.RES(7,'A')
 
     CB_C0 = lambda self: self.SET(0,'B')
@@ -1363,7 +1492,7 @@ class Z80(object):
     CB_C3 = lambda self: self.SET(0,'E')
     CB_C4 = lambda self: self.SET(0,'H')
     CB_C5 = lambda self: self.SET(0,'L')
-    CB_C6 = lambda self: self.SET(0,'HL')
+    CB_C6 = lambda self: self.SET_HL(0)
     CB_C7 = lambda self: self.SET(0,'A')
     CB_C8 = lambda self: self.SET(1,'B')
     CB_C9 = lambda self: self.SET(1,'C')
@@ -1371,7 +1500,7 @@ class Z80(object):
     CB_CB = lambda self: self.SET(1,'E')
     CB_CC = lambda self: self.SET(1,'H')
     CB_CD = lambda self: self.SET(1,'L')
-    CB_CE = lambda self: self.SET(1,'HL')
+    CB_CE = lambda self: self.SET_HL(1)
     CB_CF = lambda self: self.SET(1,'A')
 
     CB_D0 = lambda self: self.SET(2,'B')
@@ -1380,7 +1509,7 @@ class Z80(object):
     CB_D3 = lambda self: self.SET(2,'E')
     CB_D4 = lambda self: self.SET(2,'H')
     CB_D5 = lambda self: self.SET(2,'L')
-    CB_D6 = lambda self: self.SET(2,'HL')
+    CB_D6 = lambda self: self.SET_HL(2)
     CB_D7 = lambda self: self.SET(2,'A')
     CB_D8 = lambda self: self.SET(3,'B')
     CB_D9 = lambda self: self.SET(3,'C')
@@ -1388,7 +1517,7 @@ class Z80(object):
     CB_DB = lambda self: self.SET(3,'E')
     CB_DC = lambda self: self.SET(3,'H')
     CB_DD = lambda self: self.SET(3,'L')
-    CB_DE = lambda self: self.SET(3,'HL')
+    CB_DE = lambda self: self.SET_HL(3)
     CB_DF = lambda self: self.SET(3,'A')
 
     CB_E0 = lambda self: self.SET(4,'B')
@@ -1397,7 +1526,7 @@ class Z80(object):
     CB_E3 = lambda self: self.SET(4,'E')
     CB_E4 = lambda self: self.SET(4,'H')
     CB_E5 = lambda self: self.SET(4,'L')
-    CB_E6 = lambda self: self.SET(4,'HL')
+    CB_E6 = lambda self: self.SET_HL(4)
     CB_E7 = lambda self: self.SET(4,'A')
     CB_E8 = lambda self: self.SET(5,'B')
     CB_E9 = lambda self: self.SET(5,'C')
@@ -1405,7 +1534,7 @@ class Z80(object):
     CB_EB = lambda self: self.SET(5,'E')
     CB_EC = lambda self: self.SET(5,'H')
     CB_ED = lambda self: self.SET(5,'L')
-    CB_EE = lambda self: self.SET(5,'HL')
+    CB_EE = lambda self: self.SET_HL(5)
     CB_EF = lambda self: self.SET(5,'A')
 
     CB_F0 = lambda self: self.SET(6,'B')
@@ -1414,7 +1543,7 @@ class Z80(object):
     CB_F3 = lambda self: self.SET(6,'E')
     CB_F4 = lambda self: self.SET(6,'H')
     CB_F5 = lambda self: self.SET(6,'L')
-    CB_F6 = lambda self: self.SET(6,'HL')
+    CB_F6 = lambda self: self.SET_HL(6)
     CB_F7 = lambda self: self.SET(6,'A')
     CB_F8 = lambda self: self.SET(7,'B')
     CB_F9 = lambda self: self.SET(7,'C')
@@ -1422,7 +1551,7 @@ class Z80(object):
     CB_FB = lambda self: self.SET(7,'E')
     CB_FC = lambda self: self.SET(7,'H')
     CB_FD = lambda self: self.SET(7,'L')
-    CB_FE = lambda self: self.SET(7,'HL')
+    CB_FE = lambda self: self.SET_HL(7)
     CB_FF = lambda self: self.SET(7,'A')
 
 
