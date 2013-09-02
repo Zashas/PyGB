@@ -8,7 +8,6 @@ FLAGS = {
 }
 
 class Z80(object):
-    done = []
     m, t = 0,0 #Two clocks
     registers = {
                 'A':0x1, #A, B, C, D E, H, L and F are all 8bit registers
@@ -44,9 +43,9 @@ class Z80(object):
     def HL(self):
         return (self.registers['L'] << 8) | self.registers['H']
 
-    def update_clocks(self, t, m):
-        self.t += t
-        self.m += m
+    def update_clocks(self, m, t):
+        self.t = t
+        self.m = m
 
     def next_instruction(self): #Executes the following instruction
         opcode = self.memory.read_byte(self.PC)

@@ -28,6 +28,18 @@ class Memory(object):
         self.ROM = [ord(x) for x in ROM] #Converting the ROM from string to int
         self.RAM = [0]*0x8000 #Making some space for the RAM
 
+    def __getitem__(self, val):
+        if isinstance(val, slice):
+            if slice.step or not slice.start or not slice.stop:
+                raise AssertionError("This slicing method is not implemented.")
+
+            data = []
+            for addr in xrange(slice.start, slice.stop)
+                data.append(self.read_byte(addr))
+            return data
+        elif isinstance(val, int):
+            return self.read_byte(addr)
+
     def read_byte(self, addr):
         if addr >= 0 and addr <= 0x7FFF: #Cartridge ROM, bank 0 or 1
             if addr <= 0x00FF and self.BIOS_has_run == False:
@@ -64,6 +76,7 @@ class GameBoy(object):
     def launch(self):
         while self.Z80.PC != 0x0100:
             self.Z80.next_instruction()
+            self.screen.sync_clock(self.Z80.t)
 
         self.BIOS_has_run = True
         self.run()
@@ -71,8 +84,9 @@ class GameBoy(object):
     def run(self):
         while True:
             self.Z80.next_instruction()
+            self.screen.sync_clock(self.Z80.t)
 
 ROM = open('../Jeux/Tetris.gb','rb').read()
 gb = GameBoy(ROM)
 print gb.get_ROM_name()
-gb.launch()
+gb.run()
