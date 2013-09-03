@@ -24,17 +24,17 @@ BIOS =[
 
 class Memory(object):
     def __init__(self, ROM):
-        self.BIOS_has_run = False
+        self.BIOS_has_run = True
         self.ROM = [ord(x) for x in ROM] #Converting the ROM from string to int
         self.RAM = [0]*0x8000 #Making some space for the RAM
 
     def __getitem__(self, val):
         if isinstance(val, slice):
-            if slice.step or not slice.start or not slice.stop:
+            if val.step or not val.start or not val.stop:
                 raise AssertionError("This slicing method is not implemented.")
 
             data = []
-            for addr in xrange(slice.start, slice.stop)
+            for addr in xrange(val.start, val.stop):
                 data.append(self.read_byte(addr))
             return data
         elif isinstance(val, int):
@@ -52,7 +52,8 @@ class Memory(object):
 
     def write_byte(self, addr, value):
         if addr >= 0 and addr <= 0x7FFF: #Cartridge ROM, bank 0 or 1
-             raise IndexError("The program tried to write into the cartridge's ROM")
+            print "The program tried to write into the cartridge's ROM"
+            # raise IndexError("The program tried to write into the cartridge's ROM")
         else: #GameBoy's RAM
             self.RAM[addr-0x8000] = value
 

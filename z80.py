@@ -49,7 +49,6 @@ class Z80(object):
 
     def next_instruction(self): #Executes the following instruction
         opcode = self.memory.read_byte(self.PC)
-        pc = self.PC
         self.incPC()
         if opcode == 0xCB:
             opcode = self.memory.read_byte(self.PC)
@@ -59,7 +58,9 @@ class Z80(object):
         else:
             print "[PC {1}] Executing opcode {0}".format(hex(opcode), hex(self.PC-1))
             self.OPCODES[opcode](self)
-        print self.registers
+        print ", ".join(["{0} : {1}".format(k, hex(v)) for k, v in self.registers.iteritems()])
+        if self.PC-1 > 0x27E:
+            raw_input()
 
     def reset_flags(self):
         self.registers['F'] = 0
@@ -406,6 +407,16 @@ class Z80(object):
         self.memory.write_word(self.memory.read_word(self.PC), self.SP)
         self.incPC(2)
         self.update_clocks(3, 20)
+
+    def LD_A_nn(self):
+        self.registers['A'] = self.memory.read_byte(self.memory.read_word(self.PC))
+        self.incPC(2)
+        self.update_clocks(3, 16)
+
+    def LD_nn_A(self):
+        self.memory.write_byte(self.memory.read_word(self.PC), self.registers['A'])
+        self.incPC(2)
+        self.update_clocks(3, 16)
 
     def LDH_C(self):
         self.memory.write_byte(0xFF00 + self.registers['C'], self.registers['A'])
@@ -1257,7 +1268,7 @@ class Z80(object):
     OP_E7 = lambda self: self.RST(0x20)
     OP_E8 = lambda self: self.ADD_SP()
     OP_E9 = lambda self: self.JP_HL()
-    OP_EA = lambda self: self.LD('nn','A')
+    OP_EA = lambda self: self.LD_nn_A()
     #OP_EB XX
     #OP_EC XX
     #OP_ED XX
@@ -1274,7 +1285,7 @@ class Z80(object):
     OP_F7 = lambda self: self.RST(0x30)
     OP_F8 = lambda self: self.ADD_SP_to_HL()
     OP_F9 = lambda self: self.LD_SP_HL()
-    OP_FA = lambda self: self.LD('A','nn')
+    OP_FA = lambda self: self.LD_A_nn()
     OP_FB = lambda self: self.EI()
     #OP_FC XX
     #OP_FD XX
