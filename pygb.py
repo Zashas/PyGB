@@ -24,7 +24,7 @@ BIOS =[
 
 class Memory(object):
     def __init__(self, ROM):
-        self.BIOS_has_run = True
+        self.BIOS_has_run = False
         self.ROM = [ord(x) for x in ROM] #Converting the ROM from string to int
         self.RAM = [0]*0x8000 #Making some space for the RAM
 
@@ -52,8 +52,8 @@ class Memory(object):
 
     def write_byte(self, addr, value):
         if addr >= 0 and addr <= 0x7FFF: #Cartridge ROM, bank 0 or 1
-            print "The program tried to write into the cartridge's ROM"
-            # raise IndexError("The program tried to write into the cartridge's ROM")
+            # print "The program tried to write into the cartridge's ROM"
+            raise IndexError("The program tried to write into the cartridge's ROM")
         else: #GameBoy's RAM
             self.RAM[addr-0x8000] = value
 
@@ -90,4 +90,4 @@ class GameBoy(object):
 ROM = open('../Jeux/Tetris.gb','rb').read()
 gb = GameBoy(ROM)
 print gb.get_ROM_name()
-gb.run()
+gb.launch()

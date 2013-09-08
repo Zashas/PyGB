@@ -7,6 +7,7 @@ class Screen():
         self.window = pygame.display.set_mode((160, 144))
         pygame.display.set_caption('PyGB')
 
+        self.screen_buffer = [[(0,0,0)]*256 for x in xrange(256)] #256x256 RGB pixels
         self.clock = 0
         self.state = 1 #2 : scanline in OAM, 3 : scanline in VRAM, 1 : vblank, 0 : horizontal blank
         self.current_line = 0
@@ -20,7 +21,7 @@ class Screen():
         self.memory.write_byte(0xFF44, self.current_line)
 
     def write_pixel(self, pos, color):  #(x,y) & (r,g,b)
-        window.set_at(pos, color)
+        self.window.set_at(pos, color)
 
     def get_current_tile_map(self):
         return self.memory.read_byte(0xFF40) & 8
@@ -46,11 +47,17 @@ class Screen():
             self.clock -= 456
             if self.current_line == 144:
                 self.state = 1 #Vertical blanking
+                self.update_screen()
         elif self.clock >= 456 and self.state == 1:
             self.inc_current_line()
             self.clock -= 456
 
     def update_screen(self):
+        scroll_y, scroll_x = self.get_scrolls()
+        for y in xrange(144):
+            for x in xrange(160):
+                self.write_pixel((x, y), self.screen_buffer[(y+scroll_y)&255][(x+scroll_x)&255])
+
         pygame.display.flip()
 
     def scanline_OAM(self):
@@ -59,5 +66,4 @@ class Screen():
     def scanline_VRAM(self):
         map_nb, set_nb = self.get_current_tile_map(), self.get_current_tile_set()
         tiles_nb = self.memory[0x9800:0x9BFF] if map_nb == 0 else self.memory[0x9C00:0x9FFF] #0 : 0x9800 - 0x9BFF, 1 : 0x9C00 - 0x9FFF
-        scroll_y, scroll_x = self.get_scrolls()
-        tiles_nb = tiles_nb[0]
+        print tiles_nb

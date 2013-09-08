@@ -22,6 +22,19 @@ class Z80(object):
                 'PC':0x0100 #Program counter, SP and PC are both 16bit registers
     }
 
+    registers = {
+                'A':0, #A, B, C, D E, H, L and F are all 8bit registers
+                'B':0, #Some can be paired together to form 16bit registers : BC, DE, HL
+                'C':0,
+                'D':0,
+                'E':0,
+                'H':0,
+                'L':0,
+                'F':0, #Flag with data about the last operation's results
+                'SP':0, #Stack pointer
+                'PC':0 #Program counter, SP and PC are both 16bit registers
+    }
+
     def __init__(self, memory):
         self.memory = memory
 
@@ -41,7 +54,7 @@ class Z80(object):
 
     @property
     def HL(self):
-        return (self.registers['L'] << 8) | self.registers['H']
+        return (self.registers['H'] << 8) | self.registers['L']
 
     def update_clocks(self, m, t):
         self.t = t
@@ -59,8 +72,9 @@ class Z80(object):
             print "[PC {1}] Executing opcode {0}".format(hex(opcode), hex(self.PC-1))
             self.OPCODES[opcode](self)
         print ", ".join(["{0} : {1}".format(k, hex(v)) for k, v in self.registers.iteritems()])
-        if self.PC-1 > 0x27E:
-            raw_input()
+        if self.PC == 0x27a:
+            pass
+            #raw_input()
 
     def reset_flags(self):
         self.registers['F'] = 0
@@ -380,19 +394,19 @@ class Z80(object):
         self.update_clocks(2, 8)
 
     def LD_to_addr(self, dst, src):
-        dst_strong, dst_weak = self.registers[dst[1]], self.registers[dst[0]]
+        dst_strong, dst_weak = self.registers[dst[0]], self.registers[dst[1]]
         addr = (dst_strong << 8) | dst_weak
         self.memory.write_byte(addr, self.registers[src])
         self.update_clocks(1, 8)
 
     def LD_from_addr(self, dst, src):
-        src_strong, src_weak = self.registers[src[1]], self.registers[src[0]]
+        src_strong, src_weak = self.registers[src[0]], self.registers[src[1]]
         addr = (src_strong << 8) | src_weak
         self.registers[dst] = self.memory.read_byte(addr)
         self.update_clocks(1, 8)
 
     def LD16_nn(self, r):
-        r_strong, r_weak = r[1],r[0]
+        r_strong, r_weak = r[0],r[1]
         self.registers[r_strong] = self.memory.read_byte(self.PC+1)
         self.registers[r_weak] = self.memory.read_byte(self.PC)
         self.incPC(2)
@@ -451,8 +465,8 @@ class Z80(object):
         value += 1 #Increment
         value &= 0xFFFF
 
-        self.registers['L'] = value >> 8  #upper nibble
-        self.registers['H'] = value & 255 #lower nibble
+        self.registers['H'] = value >> 8  #upper nibble
+        self.registers['L'] = value & 255 #lower nibble
 
         self.update_clocks(1, 8)
 
@@ -463,8 +477,8 @@ class Z80(object):
         value -= 1 #Decrement
         value &= 0xFFFF
 
-        self.registers['L'] = value >> 8  #upper nibble
-        self.registers['H'] = value & 255 #lower nibble
+        self.registers['H'] = value >> 8  #upper nibble
+        self.registers['L'] = value & 255 #lower nibble
 
         self.update_clocks(1, 8)
 
@@ -475,8 +489,8 @@ class Z80(object):
         value += 1 #Increment
         value &= 0xFFFF
 
-        self.registers['L'] = value >> 8  #upper nibble
-        self.registers['H'] = value & 255 #lower nibble
+        self.registers['H'] = value >> 8  #upper nibble
+        self.registers['L'] = value & 255 #lower nibble
 
         self.update_clocks(1, 8)
 
@@ -487,8 +501,8 @@ class Z80(object):
         value -= 1 #Increment
         value &= 0xFFFF
 
-        self.registers['L'] = value >> 8  #upper nibble
-        self.registers['H'] = value & 255 #lower nibble
+        self.registers['H'] = value >> 8  #upper nibble
+        self.registers['L'] = value & 255 #lower nibble
 
         self.update_clocks(1, 8)
 
@@ -663,7 +677,7 @@ class Z80(object):
             self.update_clocks(3, 12)
 
     def PUSH(self, src):
-        src_strong, src_weak = self.registers[src[1]], self.registers[src[0]]
+        src_strong, src_weak = self.registers[src[0]], self.registers[src[1]]
         addr = (src_strong << 8) | src_weak
         self.registers['SP'] -= 2
         self.memory.write_word(self.SP, addr)
@@ -673,7 +687,7 @@ class Z80(object):
         addr = self.memory.read_word(self.SP)
         self.registers['SP'] += 2
         strong, weak = addr >> 8, addr & 255
-        self.registers[dst[1]], self.registers[dst[0]] = strong, weak
+        self.registers[dst[0]], self.registers[dst[1]] = strong, weak
         self.update_clocks(1, 12)
 
     def RET(self):
