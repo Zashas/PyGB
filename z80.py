@@ -9,6 +9,7 @@ FLAGS = {
 
 class Z80(object):
     m, t = 0,0 #Two clocks
+    ime = 0
     registers = {
                 'A':0x1, #A, B, C, D E, H, L and F are all 8bit registers
                 'B':0, #Some can be paired together to form 16bit registers : BC, DE, HL
@@ -65,16 +66,13 @@ class Z80(object):
         self.incPC()
         if opcode == 0xCB:
             opcode = self.memory.read_byte(self.PC)
-            print "[PC {1}] Executing CB opcode {0}".format(hex(opcode), hex(self.PC-1))
+            #print "[PC {1}] Executing CB opcode {0}".format(hex(opcode), hex(self.PC-1))
             self.incPC()
             self.CB_OPCODES[opcode](self)
         else:
-            print "[PC {1}] Executing opcode {0}".format(hex(opcode), hex(self.PC-1))
+            #print "[PC {1}] Executing opcode {0}".format(hex(opcode), hex(self.PC-1))
             self.OPCODES[opcode](self)
-        print ", ".join(["{0} : {1}".format(k, hex(v)) for k, v in self.registers.iteritems()])
-        if self.PC == 0x27a:
-            pass
-            #raw_input()
+        #print ", ".join(["{0} : {1}".format(k, hex(v)) for k, v in self.registers.iteritems()])
 
     def reset_flags(self):
         self.registers['F'] = 0
@@ -278,22 +276,22 @@ class Z80(object):
         self.update_clocks(1, 12)
 
     def INC16(self, r):
-        value = (self.registers[r[1]] << 8) | self.registers[r[0]]
+        value = (self.registers[r[0]] << 8) | self.registers[r[1]]
         value += 1
         value &= 0xFFFF
 
-        self.registers[r[1]] = value >> 8  #upper nibble
-        self.registers[r[0]] = value & 255 #lower nibble
+        self.registers[r[0]] = value >> 8  #upper nibble
+        self.registers[r[1]] = value & 255 #lower nibble
 
         self.update_clocks(1, 8)
 
     def DEC16(self, r):
-        value = (self.registers[r[1]] << 8) | self.registers[r[0]]
+        value = (self.registers[r[0]] << 8) | self.registers[r[1]]
         value -= 1
         value &= 0xFFFF
 
-        self.registers[r[1]] = value >> 8  #upper nibble
-        self.registers[r[0]] = value & 255 #lower nibble
+        self.registers[r[0]] = value >> 8  #upper nibble
+        self.registers[r[1]] = value & 255 #lower nibble
 
         self.update_clocks(1, 8)
 
@@ -432,8 +430,12 @@ class Z80(object):
         self.incPC(2)
         self.update_clocks(3, 16)
 
-    def LDH_C(self):
+    def LDH_to_C(self):
         self.memory.write_byte(0xFF00 + self.registers['C'], self.registers['A'])
+        self.update_clocks(2, 8)
+
+    def LDH_from_C(self):
+        self.registers['A'] = self.memory.read_byte(0xFF00 + self.registers['C'])
         self.update_clocks(2, 8)
 
     def LDH_from_RAM(self):
@@ -736,16 +738,16 @@ class Z80(object):
     #INTERRUPTS CONTROL INSTRUCTIONS
 
     def EI(self):
-        pass #TODO
+        self.ime = 1
 
     def DI(self):
-        pass #TODO
+        self.ime = 0
 
     def RETI(self):
         self.registers['PC'] = self.memory.read_word(self.SP)
         self.registers['SP'] += 2
         self.update_clocks(1, 16)
-        #TODO interrupt
+        self.ime = 1
 
     #DAA CORRECTION INSTRUCTION
 
@@ -1274,7 +1276,7 @@ class Z80(object):
 
     OP_E0 = lambda self: self.LDH_to_RAM()
     OP_E1 = lambda self: self.POP('HL')
-    OP_E2 = lambda self: self.LDH_C()
+    OP_E2 = lambda self: self.LDH_to_C()
     #OP_E3 XX
     #OP_E4 XX
     OP_E5 = lambda self: self.PUSH('HL')
@@ -1291,7 +1293,7 @@ class Z80(object):
 
     OP_F0 = lambda self: self.LDH_from_RAM()
     OP_F1 = lambda self: self.POP('AF')
-    #OP_F2 XX
+    OP_F2 = lambda self: self.LDH_from_C()
     OP_F3 = lambda self: self.DI()
     #OP_F4 XX
     OP_F5 = lambda self: self.PUSH('AF')
@@ -1595,7 +1597,7 @@ class Z80(object):
             OP_C0, OP_C1, OP_C2, OP_C3, OP_C4, OP_C5, OP_C6, OP_C7, OP_C8, OP_C9, OP_CA, None , OP_CC, OP_CD, OP_CE, OP_CF,
             OP_D0, OP_D1, OP_D2, None , OP_D4, OP_D5, OP_D6, OP_D7, OP_D8, OP_D9, OP_DA, None , OP_DC, None , None , OP_DF,
             OP_E0, OP_E1, OP_E2, None , None , OP_E5, OP_E6, OP_E7, OP_E8, OP_E9, OP_EA, None , None , None , None , OP_EF,
-            OP_F0, OP_F1, None , OP_F3, None , OP_F5, OP_F6, OP_F7, OP_F8, OP_F9, OP_FA, OP_FB, None , None , OP_FE, OP_FF,
+            OP_F0, OP_F1, OP_F2, OP_F3, None , OP_F5, OP_F6, OP_F7, OP_F8, OP_F9, OP_FA, OP_FB, None , None , OP_FE, OP_FF,
     ]
 
     CB_OPCODES = [

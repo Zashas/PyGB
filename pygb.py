@@ -22,6 +22,8 @@ BIOS =[
     0xF5, 0x06, 0x19, 0x78, 0x86, 0x23, 0x05, 0x20, 0xFB, 0x86, 0x20, 0xFE, 0x3E, 0x01, 0xE0, 0x50
 ] #Content of the GameBoy's BIOS, it has to be executed before the game starts.
 
+INTERRUPTS_ADDRESSES = (0x40,0x48,0x50,0x58,0x60)
+
 class Memory(object):
     def __init__(self, ROM):
         self.BIOS_has_run = False
@@ -58,11 +60,52 @@ class Memory(object):
             self.RAM[addr-0x8000] = value
 
     def read_word(self, addr):
+        #It's a little endian system.
         return self.read_byte(addr) + (self.read_byte(addr+1) << 8)
 
     def write_word(self, addr, value):
         self.write_byte(addr, value & 255)
         self.write_byte(addr+1, value >> 8)
+
+    @property
+    def interrupt_VBLANK_flag(self):
+        return self.read_byte(0xFF0F) & 1
+
+    @interrupt_VBLANK_flag.setter
+    def interrupt_VBLANK_flag(self, value):
+        self.write_byte(0xFF0F, self.read_byte(0xFF0F) & (~1&255) | value)
+
+    @property
+    def interrupt_LCD_STAT_flag(self):
+        return self.read_byte(0xFF0F) & 2
+
+    @interrupt_LCD_STAT_flag.setter
+    def interrupt_LCD_STAT_flag(self, value):
+        self.write_byte(0xFF0F, self.read_byte(0xFF0F) & (~2&255) | value)
+
+    @property
+    def interrupt_TIMER_flag(self):
+        return self.read_byte(0xFF0F) & 4
+
+    @interrupt_TIMER_flag.setter
+    def interrupt_TIMER_flag(self, value):
+        self.write_byte(0xFF0F, self.read_byte(0xFF0F) & (~4&255) | value)
+
+    @property
+    def interrupt_SERIAL_flag(self):
+        return self.read_byte(0xFF0F) & 8
+
+    @interrupt_SERIAL_flag.setter
+    def interrupt_SERIAL_flag(self, value):
+        self.write_byte(0xFF0F, self.read_byte(0xFF0F) & (~8&255) | value)
+
+    @property
+    def interrupt_JOYPAD_flag(self):
+        return self.read_byte(0xFF0F) & 16
+
+    @interrupt_JOYPAD_flag.setter
+    def interrupt_JOYPAD_flag(self, value):
+        self.write_byte(0xFF0F, self.read_byte(0xFF0F) & (~16&255) | value)
 
 class GameBoy(object):
     def __init__(self, ROM):
@@ -71,23 +114,31 @@ class GameBoy(object):
         self.screen = Screen(self.memory)
 
     def get_ROM_name(self):
-        chars = self.memory.ROM[0x0134:0x0143]
+        chars = self.memory.ROM[0x0134:0x0143] #The ROM's name is simply written at this address
         return "".join([chr(x) for x in chars])
 
-    def launch(self):
-        while self.Z80.PC != 0x0100:
-            self.Z80.next_instruction()
-            self.screen.sync_clock(self.Z80.t)
-
-        self.BIOS_has_run = True
-        self.run()
-
     def run(self):
+        a = 0
         while True:
+            if self.Z80.PC == 0x100 and self.memory.BIOS_has_run == False:
+                print "BIOS has been executed"
+                self.memory.BIOS_has_run = True #BIOS starts at 0 and goes to 0x100, once there it has to be removed from the memory
             self.Z80.next_instruction()
             self.screen.sync_clock(self.Z80.t)
+
+            #Interrupts handling
+            for i in xrange(5):
+                if self.Z80.ime and self.memory.read_byte(0xFFFF) & (1 << i) and self.memory.read_byte(0xFF0F) & (1 << i): #interrupts enabled && specific interrupt enabled && interrupt requested
+                    self.memory.write_byte(0xFF0F, self.memory.read_byte(0xFF0F) & ~(1 << i))
+                    self.Z80.ime = False #Prevents other interrupts
+                    self.registers['SP'] -= 2
+                    self.memory.write_word(self.Z80.SP, self.Z80)
+                    self.registers['PC'] = INTERRUPTS_ADDRESSES[i]
+                    self.screen.sync_clock(12) #Every interrupt takes 12 CPU cycles
+
+
 
 ROM = open('../Jeux/Tetris.gb','rb').read()
 gb = GameBoy(ROM)
 print gb.get_ROM_name()
-gb.launch()
+gb.run()
