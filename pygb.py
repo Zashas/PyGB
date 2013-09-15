@@ -131,9 +131,9 @@ class GameBoy(object):
                 if self.Z80.ime and self.memory.read_byte(0xFFFF) & (1 << i) and self.memory.read_byte(0xFF0F) & (1 << i): #interrupts enabled && specific interrupt enabled && interrupt requested
                     self.memory.write_byte(0xFF0F, self.memory.read_byte(0xFF0F) & ~(1 << i))
                     self.Z80.ime = False #Prevents other interrupts
-                    self.registers['SP'] -= 2
+                    self.Z80.registers['SP'] -= 2
                     self.memory.write_word(self.Z80.SP, self.Z80)
-                    self.registers['PC'] = INTERRUPTS_ADDRESSES[i]
+                    self.Z80.registers['PC'] = INTERRUPTS_ADDRESSES[i]
                     self.screen.sync_clock(12) #Every interrupt takes 12 CPU cycles
 
 

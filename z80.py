@@ -8,6 +8,7 @@ FLAGS = {
 }
 
 class Z80(object):
+    done = []
     m, t = 0,0 #Two clocks
     ime = 0
     registers = {
@@ -62,6 +63,9 @@ class Z80(object):
         self.m = m
 
     def next_instruction(self): #Executes the following instruction
+        if self.PC not in self.done:
+            self.done.append(self.PC)
+            print hex(self.PC)
         opcode = self.memory.read_byte(self.PC)
         self.incPC()
         if opcode == 0xCB:
